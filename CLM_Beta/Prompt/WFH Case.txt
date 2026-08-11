@@ -1,0 +1,21 @@
+here from frontend page when we click on "Click here to generate" button with "Create New Request" radiobutton selected, it open some input fields,
+there in "Requisition Type" dropdown (ddl_type_requisition --> its value always comes from DB). table behind databind of this dropdown is below
+
+1 |	SPN1112	| New Safety Training |	SPN	| SAFETY PASS REQUISITION TYPE
+2 |	WFH1112	| WFH-New	          | WFH	| SAFETY PASS REQUISITION TYPE
+
+About this Wrok From Home (WFH) case what was discussed in meeting, below is the summary.
+
+The following points were discussed in today’s meeting. Kindly review and share your comments, if any.
+	1. In Requisition Type, two new conditions need to be added: WFH (New) and WFH (Renew).
+	2. The vendor has to fill all the details, including Personal Information, Qualification & Experience, and other required details.
+	3. For skill training, a waiver option needs to be provided, and SLDC will enter the data.
+	4. To bypass medical details, either dummy medical data needs to be filled, or SLDC will enter the details manually. If data insertion is required, kindly provide the dummy data 
+	5. Safety pass validity will be considered as 1 year from the training/medical date.
+	6. The documents verification process will remain unchanged.
+	7. The document upload option for Company Identity Card, along with the text field for ID card number, will not be provided as discussed with Manjeet Ji.
+	8. In place of police verification, a Conduct document needs to be uploaded, which will be verified by the Security team.
+	9. In the gate pass application screen, the type of gate pass needs to be added as WFH-New and WFH-Renew.
+	10. Print of gate pass need to be Bypassed.
+	11. Release of the gate pass will be handled by the Security team, as per the existing process.
+
