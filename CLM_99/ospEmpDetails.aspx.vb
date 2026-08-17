@@ -1255,9 +1255,11 @@ Partial Class ospEmpDetails
         End Try
     End Sub
     Public Sub ShowMessage(ByVal vMgs As String)
-        Dim vScript As String = ""
-        vScript = "javascript:alert('" + vMgs + "');"
-        ScriptManager.RegisterStartupScript(Me, Me.[GetType](), "Message", vScript, True)
+        ' Show the message inside the page's modal (Confirm and Copy buttons) instead of a JavaScript alert.
+        Dim msgHtml As String = Server.HtmlEncode(vMgs)
+        msgHtml = msgHtml.Replace(vbCrLf, "<br />").Replace(vbLf, "<br />").Replace("\n", "<br />")
+        divMessageContent.InnerHtml = msgHtml
+        MPopUpMessage.Show()
     End Sub
     Public Sub ErrorRow(ByVal tblError As HtmlTable, ByVal vErrMsg As String)
         err_cnt = err_cnt + 1
@@ -13438,7 +13440,7 @@ Partial Class ospEmpDetails
 
 
             Catch ex As Exception
-                ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Error occurs operation reverted');", True)
+                ShowMessage("Error occurs operation reverted")
             End Try
         End If
 
@@ -13673,10 +13675,10 @@ Partial Class ospEmpDetails
                 Next
                 tran_Ins.Commit()
                 empView()
-                ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Record has been rejected successfully');", True)
+                ShowMessage("Record has been rejected successfully")
             Catch ex As Exception
                 tran_Ins.Rollback()
-                ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Error occurs operation reverted');", True)
+                ShowMessage("Error occurs operation reverted")
 
             Finally
                 If con.State = ConnectionState.Open Then
@@ -13848,7 +13850,7 @@ Partial Class ospEmpDetails
 
 
             Catch ex As Exception
-                ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Error occurs operation reverted');", True)
+                ShowMessage("Error occurs operation reverted")
             End Try
         End If
 
@@ -16721,11 +16723,11 @@ Partial Class ospEmpDetails
                             Next
                             tran_Ins.Commit()
 
-                            ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Record has been Re-applyed successfully');", True)
+                            ShowMessage("Record has been Re-applyed successfully")
                             getskill(spno)
                         Catch ex As Exception
                             tran_Ins.Rollback()
-                            ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Error occurs operation reverted');", True)
+                            ShowMessage("Error occurs operation reverted")
                         Finally
                             If con.State = ConnectionState.Open Then
                                 con.Close()
@@ -16735,7 +16737,7 @@ Partial Class ospEmpDetails
                 End If
 
             Catch ex As Exception
-                ScriptManager.RegisterStartupScript(Me, GetType(String), "showalert", "alert('Error occurs operation reverted');", True)
+                ShowMessage("Error occurs operation reverted")
             End Try
         End If
     End Sub
