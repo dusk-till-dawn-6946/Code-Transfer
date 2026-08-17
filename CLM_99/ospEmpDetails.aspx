@@ -4075,6 +4075,33 @@
                     </table>
                 </asp:Panel>
 
+                <%-- Message modal: shows ShowMessage() text (error/solution quotes) instead of a JavaScript alert.
+                     Confirm closes the modal with its backdrop; Copy copies the text to the clipboard. --%>
+                <ajaxToolkit:ModalPopupExtender ID="MPopUpMessage" runat="server" BackgroundCssClass="modalBackground"
+                    TargetControlID="lblMessageDummy" PopupControlID="pnlMessage">
+                </ajaxToolkit:ModalPopupExtender>
+                <asp:Panel runat="server" ID="pnlMessage" CssClass="modalPopup" Width="750px" BorderStyle="Solid" BorderColor="Black" BorderWidth="1px" Visible="false">
+                    <asp:Label runat="server" ID="lblMessageDummy" Style="display: none"></asp:Label>
+                    <table cellpadding="8" cellspacing="2" width="100%">
+                        <tr>
+                            <td style="background-color: #3333FF; color: White; font-family: Arial; font-size: 14px; font-weight: bold; text-align: center;">
+                                Message
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div id="divMessageContent" runat="server" style="max-height: 350px; overflow-y: auto; font-family: Arial; font-size: 12px; line-height: 1.6; text-align: left;"></div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: center; padding-top: 10px;">
+                                <input type="button" id="btnMessageCopy" value="Copy" class="btnStyle" onclick="CopyModalMessage();" />
+                                <input type="button" id="btnMessageConfirm" value="Confirm" class="btnStyle" onclick="CloseMessageModal();" />
+                            </td>
+                        </tr>
+                    </table>
+                </asp:Panel>
+
                 <ajaxToolkit:ModalPopupExtender ID="ModalPopupConfirmRejectReq" runat="server" BackgroundCssClass="modalBackground" TargetControlID="Label30" PopupControlID="pnlConfirmRejectReq">
                 </ajaxToolkit:ModalPopupExtender>
                 <asp:Panel runat="server" ID="pnlConfirmRejectReq" CssClass="modalPopup" Width="550px" BorderStyle="Solid" BorderColor="Black" BorderWidth="1px" Visible="false">
@@ -4294,5 +4321,45 @@
             return rtn;
         }
         //end add by prasun chakraborty
+    </script>
+
+    <script type="text/javascript">
+        // Message modal helpers: Confirm closes the modal with its backdrop, Copy copies the text to the clipboard.
+        function CloseMessageModal() {
+            var mp = $find('<%= MPopUpMessage.ClientID %>');
+            if (mp) {
+                mp.hide();
+            }
+        }
+
+        function CopyModalMessage() {
+            var el = document.getElementById('<%= divMessageContent.ClientID %>');
+            if (!el) {
+                return;
+            }
+            var text = el.innerText || el.textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(
+                    function () { /* copied */ },
+                    function () { fallbackCopyModalMessage(text); }
+                );
+            } else {
+                fallbackCopyModalMessage(text);
+            }
+        }
+
+        function fallbackCopyModalMessage(text) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            try {
+                document.execCommand('copy');
+            } catch (e) { /* ignore */ }
+            document.body.removeChild(ta);
+        }
     </script>
 </asp:Content>
