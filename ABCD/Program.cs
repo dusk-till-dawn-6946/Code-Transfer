@@ -35,6 +35,7 @@ namespace ATTENDANCE_AUTOMAILER
         private static int Main(string[] args)
         {
             Logger.Initialize();
+            Logger.Info("Command line: " + Environment.CommandLine);
 
             try
             {
@@ -101,6 +102,21 @@ namespace ATTENDANCE_AUTOMAILER
                 attendanceDate,
                 now));
 
+            // Where each value came from. A run that silently falls back to the clock is the
+            // first thing to rule out when the report does not match the shift / date asked for.
+            Logger.Info("Shift source    : " + (options.AllShifts
+                ? "--shift ALL"
+                : options.ShiftCode != null
+                    ? "--shift " + options.ShiftCode
+                    : "run time (no --shift passed, so the shift that ended at " + now.ToString("HH:mm", CultureInfo.InvariantCulture) + " was used)"));
+            Logger.Info("Date source     : " + (options.AttendanceDate.HasValue
+                ? "--date " + options.AttendanceDate.Value.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture)
+                : "run time (no --date passed, so " + attendanceDate.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture) + " was derived from the run time)"));
+            Logger.Info("Location source : " + (string.IsNullOrEmpty(options.LocationCode)
+                ? "App.config LocationCode"
+                : "--location " + options.LocationCode));
+            Logger.Info("Database target : " + AttendanceRepository.DescribeTarget());
+
             if (shift.Code != "ALL")
             {
                 Logger.Info(string.Format(
@@ -139,9 +155,28 @@ namespace ATTENDANCE_AUTOMAILER
                 result.HighRiskCount,
                 DescribeCounts(result)));
 
+            if (result.PunchCountByShift.Count > 0)
+            {
+                Logger.Info("Workers per shift in the data: " + DescribeWorkersPerShift(result));
+            }
+
             if (segments.Count == 0)
             {
-                Logger.Warn("No attendance segment was found for this shift / date. Check the shift window and the punch data.");
+                Logger.Warn(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "No attendance segment at all for location {0} on {1:dd-MM-yyyy}. Run this in SQL*Plus / PL/SQL Developer on the SAME database to see what the query starts from: SELECT COUNT(*) FROM hrace.t_card_punchdata p JOIN hrace.t_cemp_details e ON p.cpd_person_no = e.ced_safety_pass_no WHERE p.cpd_punch_date >= TO_DATE('{1:dd-MM-yyyy}','DD-MM-YYYY') AND p.cpd_punch_date < TO_DATE('{1:dd-MM-yyyy}','DD-MM-YYYY') + 2 AND e.ced_company_code = {0} ; If that returns rows but the batch reads 0, the difference is e.ced_sp_enabled = 'Y' or p.cpd_inout_flag IN ('I','O'), or the batch is on another database than the one you queried.",
+                    locationCode,
+                    attendanceDate));
+            }
+            else if (!options.AllShifts && result.WorkersInShift == 0)
+            {
+                Logger.Warn(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "No worker has an In punch inside the {0} window ({1}) on {2:dd-MM-yyyy}, although {3} worker(s) have attendance segments in other shifts. Check --shift, --date and --location (use --shift ALL to report every shift).",
+                    shift.Code,
+                    shift.WindowText,
+                    attendanceDate,
+                    result.TotalWorkers));
             }
 
             string outputFolder = string.IsNullOrEmpty(options.OutputFolder) ? AppSettings.OutputDirectory : options.OutputFolder;
@@ -261,6 +296,16 @@ namespace ATTENDANCE_AUTOMAILER
                 .ToList();
         }
 
+        private static string DescribeWorkersPerShift(ViolationResult result)
+        {
+            return string.Join(
+                ", ",
+                result.PunchCountByShift
+                    .OrderBy(p => p.Key)
+                    .Select(p => (string.IsNullOrEmpty(p.Key) ? "(none)" : p.Key) + "=" + p.Value.ToString(CultureInfo.InvariantCulture))
+                    .ToArray());
+        }
+
         private static string DescribeCounts(ViolationResult result)
         {
             return string.Format(
@@ -353,29 +398,29 @@ namespace ATTENDANCE_AUTOMAILER
                             break;
                         case "--shift":
                         case "-s":
-                            options.ShiftCode = value;
+                            options.ShiftCode = RequireValue(argument, value);
                             index++;
                             break;
                         case "--date":
                         case "-d":
-                            options.AttendanceDate = ParseDate(value);
+                            options.AttendanceDate = ParseDate(RequireValue(argument, value));
                             index++;
                             break;
                         case "--location":
                         case "-l":
-                            options.LocationCode = value;
+                            options.LocationCode = RequireValue(argument, value);
                             index++;
                             break;
                         case "--to":
-                            options.To = value;
+                            options.To = RequireValue(argument, value);
                             index++;
                             break;
                         case "--cc":
-                            options.Cc = value;
+                            options.Cc = RequireValue(argument, value);
                             index++;
                             break;
                         case "--out":
-                            options.OutputFolder = value;
+                            options.OutputFolder = RequireValue(argument, value);
                             index++;
                             break;
                         case "--no-mail":
@@ -390,6 +435,21 @@ namespace ATTENDANCE_AUTOMAILER
                 }
 
                 return options;
+            }
+
+            /// <summary>
+            /// A switch that needs a value must not silently fall back to a default: an
+            /// --shift with no value used to mean "use the run time", which reports a
+            /// different shift than the caller asked for.
+            /// </summary>
+            private static string RequireValue(string argument, string value)
+            {
+                if (value == null || value.Trim().Length == 0 || value.Trim().StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(argument + " requires a value. Use --help for usage.");
+                }
+
+                return value.Trim();
             }
 
             private static DateTime? ParseDate(string value)
@@ -1045,6 +1105,24 @@ namespace ATTENDANCE_AUTOMAILER
             }
 
             return rows;
+        }
+
+        /// <summary>
+        /// Host / SID of the configured connection, so the log shows which database the run used.
+        /// </summary>
+        public static string DescribeTarget()
+        {
+            try
+            {
+                OracleConnectionStringBuilder builder = new OracleConnectionStringBuilder(
+                    ConfigurationManager.ConnectionStrings["OraConnGatepass"].ConnectionString);
+
+                return builder.DataSource;
+            }
+            catch (Exception)
+            {
+                return "(connection string could not be parsed)";
+            }
         }
 
         private static string ToOracleDate(DateTime value)
