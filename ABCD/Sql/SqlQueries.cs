@@ -1,18 +1,31 @@
 namespace ATTENDANCE_AUTOMAILER.Sql
 {
     /// <summary>
-    /// SQL used by the batch, ported from frmTimekeeper.aspx.vb (Get_Final_Attd_query,
-    /// GetConsecutive10DaysDetailsQuery and the punch data queries).
+    /// The only SQL used by the batch. Ported from frmTimekeeper.aspx.vb
+    /// (Get_Final_Attd_query, the missing punch query and the consecutive days query).
     ///
-    /// Binds: :p_startdate / :p_enddate (dd-MM-yyyy), :p_locationcode, :p_gap_hours,
-    ///        :p_cutoff_hour, :p_high_minutes, :p_medium_minutes, :p_min_days.
+    /// Bind variables (System.Data.OracleClient binds by name):
+    ///   :p_startdate    dd-MM-yyyy  attendance day
+    ///   :p_enddate      dd-MM-yyyy  attendance day (streak query)
+    ///   :p_locationcode company / location code
+    ///   :p_cutoff_hour  attendance day rollover hour
+    ///   :p_gap_hours    In punches closer than this belong to the same segment
+    ///   :p_min_days     minimum streak length for the consecutive days query
     ///
-    /// Differences from the web page: gatepass lookup uses LEFT JOIN + ROW_NUMBER instead of
-    /// OUTER APPLY (not valid Oracle), and the violation counts/details are done in C# so the
-    /// batch can filter by shift.
+    /// Differences from the web page, and why:
+    ///  1. The gatepass lookup uses a ROW_NUMBER() CTE instead of OUTER APPLY + FETCH FIRST,
+    ///     because OUTER APPLY / FETCH FIRST are not valid on the Oracle versions in use.
+    ///  2. Every bind is repeated instead of being built dynamically, so the SQL text is constant
+    ///     and the statement can be parsed once per session.
+    ///  3. Department / vendor filters are applied in C# so the SQL text does not change.
+    ///  4. The streak length is :p_min_days instead of a hard-coded 10.
     /// </summary>
     public static class SqlQueries
     {
+        /// <summary>
+        /// CTE chain of Get_Final_Attd_query, verbatim apart from the gatepass lookup.
+        /// Ends with the CTEs final_attd, cgp_latest and ca_names so callers can join them.
+        /// </summary>
         private const string FinalAttdCte = @"
 WITH base AS (
     SELECT
@@ -257,6 +270,9 @@ final_attd AS (
     LPAD(FLOOR(display_minutes / 60), 4, '0') || ':' || LPAD(MOD(display_minutes, 60), 2, '0') AS display_hhmm,
     display_minutes AS raw_minutes,
     display_work_status AS work_status,
+    merge_with_next,
+    merge_both_open,
+    retro_close_with_next,
     seg_count,
     CASE
         WHEN TO_CHAR(in_ts_display, 'HH24:MI') BETWEEN '05:00' AND '07:00' THEN 'A'
@@ -281,7 +297,7 @@ cgp_latest AS (
     WHERE rn = 1
 ),
 ca_names AS (
-    SELECT DISTINCT w.wod_comp_code, w.wod_wo_number,
+    SELECT w.wod_comp_code, w.wod_wo_number,
            LISTAGG(e.ema_ename, ' and ') WITHIN GROUP (ORDER BY e.ema_ename) AS owner_and_admin
     FROM hrace.t_workorder_details w
     JOIN hrace.v_empl_all e
@@ -290,7 +306,10 @@ ca_names AS (
     GROUP BY w.wod_comp_code, w.wod_wo_number
 )";
 
-        /// <summary>Resolved in/out segments of the attendance day (all shifts).</summary>
+        /// <summary>
+        /// Resolved in/out segments of the attendance day, every shift. Shift filtering and the
+        /// violation rules are applied in Program.cs.
+        /// </summary>
         public static string AttendanceDetails
         {
             get
@@ -326,10 +345,7 @@ SELECT
     a.display_hours            AS display_hours,
     a.display_hhmm             AS total_hours,
     a.work_status              AS work_status,
-    a.seg_count                AS seg_count,
-    a.merge_with_next,
-    a.merge_both_open,
-    a.retro_close_with_next
+    a.seg_count                AS seg_count
 FROM final_attd a
 LEFT JOIN cgp_latest cgp
        ON cgp.cgp_safety_pass_no = a.cpd_person_no
@@ -341,7 +357,10 @@ ORDER BY a.cpd_person_no, a.seq_no";
             }
         }
 
-        /// <summary>First punch of the day is an "Out" punch -> missing In punch.</summary>
+        /// <summary>
+        /// Workers whose first punch of the attendance day is an "Out" punch, i.e. the In punch is
+        /// missing. first_punch holds one row per worker, so no GROUP BY is needed.
+        /// </summary>
         public static string MissingInPunches
         {
             get
@@ -377,7 +396,7 @@ d AS (
 ),
 ranked AS (
     SELECT d.*,
-           ROW_NUMBER() OVER (PARTITION BY cpd_card_no, cpd_person_no ORDER BY punch_ts) AS rn
+           ROW_NUMBER() OVER (PARTITION BY d.cpd_card_no, d.cpd_person_no ORDER BY d.punch_ts) AS rn
     FROM d
 ),
 first_punch AS (
@@ -413,20 +432,19 @@ SELECT
       WHERE vdt_company_code = :p_locationcode
         AND vdt_vendor_code  = NVL(cgp.cgp_vendor_code, f.vendor_code)) AS vendor_name,
     cgp.cgp_wo_number AS wo_no,
-    MIN(f.punch_ts)   AS first_punch_time
+    f.punch_ts        AS first_punch_time
 FROM first_punch f
 LEFT JOIN cgp_latest cgp
        ON cgp.cgp_safety_pass_no = f.cpd_person_no
       AND cgp.cgp_comp_code      = f.company_code
-GROUP BY f.company_code, f.dept_code, f.cpd_card_no, f.cpd_person_no, f.worker_name,
-         NVL(cgp.cgp_vendor_code, f.vendor_code), cgp.cgp_wo_number
 ORDER BY f.cpd_person_no";
             }
         }
 
         /// <summary>
-        /// Gap-and-islands over daily In punches (port of GetConsecutive10DaysDetailsQuery):
+        /// Gap-and-islands over daily punches (port of GetConsecutive10DaysDetailsQuery):
         /// streaks ending on the attendance day with at least :p_min_days days.
+        /// The window is the same 29 days used by the web page.
         /// </summary>
         public static string ContinuousStreaks
         {
@@ -438,7 +456,7 @@ WITH punch_dates AS (
     FROM hrace.t_card_punchdata a
     JOIN hrace.t_cemp_details ced
       ON ced.ced_safety_pass_no = a.cpd_person_no
-     AND ced.ced_sp_enabled IN ('Y','N')
+     AND ced.ced_sp_enabled  IN ('Y','N')
      AND ced.ced_company_code = :p_locationcode
     WHERE a.cpd_inout_flag = 'I'
       AND TRUNC(a.cpd_punch_date) BETWEEN TO_DATE(:p_enddate, 'DD-MM-YYYY') - 29
@@ -494,7 +512,7 @@ SELECT
 FROM valid_streaks vs
 JOIN hrace.t_cemp_details cd
   ON cd.ced_safety_pass_no = vs.cpd_person_no
- AND cd.ced_sp_enabled IN ('Y','N')
+ AND cd.ced_sp_enabled  IN ('Y','N')
  AND cd.ced_company_code = :p_locationcode
 ORDER BY vs.cpd_person_no";
             }
